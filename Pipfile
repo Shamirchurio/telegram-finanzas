@@ -1,0 +1,15 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+python-telegram-bot = "==22.3"
+pandas = "==2.3.1"
+openpyxl = "==3.1.5"
+python-dotenv = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"

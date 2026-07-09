@@ -1,0 +1,25 @@
+# Variables de entorno
+.env
+
+# Base de datos
+*.db
+data/
+
+# Backups
+backups/
+*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# VS Code
+.vscode/
+
+# Pipenv
+Pipfile.lock
+
+# Windows
+Thumbs.db
+Desktop.ini
