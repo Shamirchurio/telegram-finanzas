@@ -1,0 +1,10 @@
+# Evita que el builder de Vercel detecte Pipfile y use pipenv en vez de
+# requirements.txt (Pipfile es solo para el entorno local/pipenv y no tiene
+# fastapi/libsql-client, que sí necesita la función serverless).
+Pipfile
+Pipfile.lock
+
+# Archivos/carpetas de uso exclusivamente local (no los necesita la función serverless)
+__pycache__/
+.venv/
+scripts/
