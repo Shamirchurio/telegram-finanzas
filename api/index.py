@@ -78,6 +78,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Pago arriendo $1.322.069\n"
         "• 30/06/2026 Gas $20.460\n"
         "• 2026-06-30 Pago claro $103.995\n\n"
+        "También podés enviar la foto del recibo con el texto del gasto "
+        "como descripción (caption) de la foto — queda guardada y cualquiera "
+        "la puede consultar después con /foto.\n\n"
         "Comandos:\n"
         "/id - ver tu chat_id\n"
         "/mes - total del mes actual\n"
@@ -86,6 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ultimos - últimos 10 gastos\n"
         "/buscar apolo - buscar por texto\n"
         "/categoria servicios - total por categoría\n"
+        "/foto 12 - ver el recibo adjunto a un gasto (📷 en los listados)\n"
         "/editar 12 valor 20000 - editar un gasto por id\n"
         "/eliminar 12 - eliminar un gasto por id\n"
         "/exportar - generar Excel"
@@ -99,7 +103,33 @@ async def mi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @requiere_autorizacion
 async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto_original = update.message.text.strip()
+    await _registrar_desde_texto(update, context, update.message.text)
+
+
+@requiere_autorizacion
+async def registrar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    caption = update.message.caption
+    if not caption or not caption.strip():
+        await update.message.reply_text(
+            "Recibí la foto pero le falta el texto del gasto en el caption.\n"
+            "Envíala de nuevo agregando una descripción, ej:\n"
+            "Pago arriendo $1.322.069 (como caption de la foto)"
+        )
+        return
+
+    # update.message.photo trae varias resoluciones de la misma foto;
+    # la última es la de mayor calidad.
+    foto_file_id = update.message.photo[-1].file_id
+    await _registrar_desde_texto(update, context, caption, foto_file_id=foto_file_id)
+
+
+async def _registrar_desde_texto(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    texto: str,
+    foto_file_id: str | None = None,
+):
+    texto_original = texto.strip()
 
     try:
         fecha_movimiento, texto = extraer_fecha(texto_original)
@@ -119,9 +149,11 @@ async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     usuario_id = update.effective_user.id
     usuario_nombre = update.effective_user.full_name
 
-    await db_turso.insertar_gasto(item, valor, categoria, usuario_id, usuario_nombre, fecha_movimiento)
+    await db_turso.insertar_gasto(
+        item, valor, categoria, usuario_id, usuario_nombre, fecha_movimiento, foto_file_id
+    )
 
-    await update.message.reply_text(
+    respuesta = (
         "Registrado ✅\n"
         f"Fecha: {fecha_movimiento.strftime('%d/%m/%Y')}\n"
         f"Item: {item}\n"
@@ -129,6 +161,10 @@ async def registrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Categoría: {categoria}\n"
         f"Usuario: {usuario_nombre}"
     )
+    if foto_file_id:
+        respuesta += "\n📷 Recibo guardado — cualquiera puede verlo con /foto"
+
+    await update.message.reply_text(respuesta)
 
 
 @requiere_autorizacion
@@ -186,31 +222,30 @@ async def meses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     total = int(df["valor"].sum())
 
-    resumen_mes = (
-        df.groupby(["anio", "n_mes", "mes"], as_index=False)["valor"]
+    resumen = (
+        df.groupby(["anio", "n_mes", "mes", "categoria"], as_index=False)["valor"]
         .sum()
-        .sort_values(["anio", "n_mes"])
+        .sort_values(["anio", "n_mes", "valor"], ascending=[True, True, False])
     )
-    lineas_mes = [
-        f"{r.mes} {r.anio}: {formato_pesos(int(r.valor))}"
-        for r in resumen_mes.itertuples()
-    ]
 
-    resumen_cat = (
-        df.groupby("categoria", as_index=False)["valor"]
-        .sum()
-        .sort_values("valor", ascending=False)
-    )
-    lineas_cat = [
-        f"{r.categoria}: {formato_pesos(int(r.valor))}"
-        for r in resumen_cat.itertuples()
-    ]
+    bloques = []
+    for (anio, _n_mes, mes_nombre), grupo in resumen.groupby(
+        ["anio", "n_mes", "mes"], sort=False
+    ):
+        total_mes = int(grupo["valor"].sum())
+        lineas_cat = [
+            f"  {r.categoria}: {formato_pesos(int(r.valor))}"
+            for r in grupo.itertuples()
+        ]
+        bloques.append(
+            f"{mes_nombre} {anio} — Total: {formato_pesos(total_mes)}\n"
+            + "\n".join(lineas_cat)
+        )
 
     await update.message.reply_text(
         f"Resumen de los últimos {n} meses\n\n"
-        f"Por mes:\n" + "\n".join(lineas_mes) + "\n\n"
-        f"Por categoría:\n" + "\n".join(lineas_cat) + "\n\n"
-        f"Total: {formato_pesos(total)}"
+        + "\n\n".join(bloques)
+        + f"\n\nTotal general: {formato_pesos(total)}"
     )
 
 
@@ -219,7 +254,7 @@ async def hoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now().strftime("%Y-%m-%d")
     df = await db_turso.consultar_df(
         """
-        SELECT id, fecha, item, valor, categoria, usuario_nombre
+        SELECT id, fecha, item, valor, categoria, usuario_nombre, foto_file_id
         FROM gastos
         WHERE substr(fecha,1,10)=?
         ORDER BY id DESC
@@ -234,6 +269,7 @@ async def hoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = int(df["valor"].sum())
     lineas = [
         f"#{r.id} | {r.item} - {formato_pesos(int(r.valor))} ({r.categoria})"
+        + (" 📷" if r.foto_file_id else "")
         for r in df.itertuples()
     ]
 
@@ -247,7 +283,7 @@ async def hoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @requiere_autorizacion
 async def ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     df = await db_turso.consultar_df("""
-        SELECT id, fecha, item, valor, categoria, usuario_nombre
+        SELECT id, fecha, item, valor, categoria, usuario_nombre, foto_file_id
         FROM gastos
         ORDER BY id DESC
         LIMIT 10
@@ -259,6 +295,7 @@ async def ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lineas = [
         f"#{r.id} | {r.fecha[:10]} | {r.item} - {formato_pesos(int(r.valor))} ({r.categoria})"
+        + (" 📷" if r.foto_file_id else "")
         for r in df.itertuples()
     ]
 
@@ -275,7 +312,7 @@ async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     df = await db_turso.consultar_df(
         """
-        SELECT id, fecha, item, valor, categoria
+        SELECT id, fecha, item, valor, categoria, foto_file_id
         FROM gastos
         WHERE lower(item) LIKE lower(?)
         ORDER BY id DESC
@@ -291,6 +328,7 @@ async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = int(df["valor"].sum())
     lineas = [
         f"#{r.id} | {r.fecha[:10]} | {r.item} - {formato_pesos(int(r.valor))} ({r.categoria})"
+        + (" 📷" if r.foto_file_id else "")
         for r in df.itertuples()
     ]
 
@@ -311,7 +349,7 @@ async def categoria(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     df = await db_turso.consultar_df(
         """
-        SELECT id, fecha, item, valor, categoria
+        SELECT id, fecha, item, valor, categoria, foto_file_id
         FROM gastos
         WHERE lower(categoria)=lower(?)
         ORDER BY id DESC
@@ -326,6 +364,7 @@ async def categoria(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = int(df["valor"].sum())
     lineas = [
         f"#{r.id} | {r.fecha[:10]} | {r.item} - {formato_pesos(int(r.valor))}"
+        + (" 📷" if r.foto_file_id else "")
         for r in df.itertuples()
     ][:20]
 
@@ -427,6 +466,34 @@ async def editar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @requiere_autorizacion
+async def foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "Usa: /foto <id>\n"
+            "El id lo ves con /ultimos, /hoy, /buscar o /categoria (marcado con 📷)."
+        )
+        return
+
+    id_gasto = int(args[0])
+    gasto = await db_turso.obtener_gasto(id_gasto)
+
+    if gasto is None:
+        await update.message.reply_text(f"No existe un gasto con id #{id_gasto}.")
+        return
+
+    if not gasto["foto_file_id"]:
+        await update.message.reply_text(f"El gasto #{id_gasto} no tiene foto adjunta.")
+        return
+
+    await update.message.reply_photo(
+        photo=gasto["foto_file_id"],
+        caption=f"#{gasto['id']} | {gasto['item']} - {formato_pesos(gasto['valor'])} ({gasto['categoria']})",
+    )
+
+
+@requiere_autorizacion
 async def exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     df = await db_turso.consultar_df("SELECT * FROM gastos")
 
@@ -468,8 +535,10 @@ async def _build_application():
     application.add_handler(CommandHandler("categoria", categoria))
     application.add_handler(CommandHandler("editar", editar))
     application.add_handler(CommandHandler("eliminar", eliminar))
+    application.add_handler(CommandHandler("foto", foto))
     application.add_handler(CommandHandler("exportar", exportar))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, registrar))
+    application.add_handler(MessageHandler(filters.PHOTO, registrar_foto))
 
     await application.initialize()
     await db_turso.init_db()

@@ -49,7 +49,8 @@ async def init_db() -> None:
                 valor INTEGER NOT NULL,
                 categoria TEXT NOT NULL,
                 usuario_id INTEGER,
-                usuario_nombre TEXT
+                usuario_nombre TEXT,
+                foto_file_id TEXT
             )
         """)
 
@@ -59,6 +60,8 @@ async def init_db() -> None:
             await client.execute("ALTER TABLE gastos ADD COLUMN usuario_id INTEGER")
         if "usuario_nombre" not in columnas:
             await client.execute("ALTER TABLE gastos ADD COLUMN usuario_nombre TEXT")
+        if "foto_file_id" not in columnas:
+            await client.execute("ALTER TABLE gastos ADD COLUMN foto_file_id TEXT")
 
 
 async def insertar_gasto(
@@ -68,13 +71,14 @@ async def insertar_gasto(
     usuario_id: int,
     usuario_nombre: str,
     fecha_movimiento: datetime,
+    foto_file_id: str | None = None,
 ) -> None:
     async with _client() as client:
         await client.execute(
             """
             INSERT INTO gastos
-            (fecha, anio, n_mes, mes, item, valor, categoria, usuario_id, usuario_nombre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (fecha, anio, n_mes, mes, item, valor, categoria, usuario_id, usuario_nombre, foto_file_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 fecha_movimiento.strftime("%Y-%m-%d %H:%M:%S"),
@@ -86,6 +90,7 @@ async def insertar_gasto(
                 categoria,
                 usuario_id,
                 usuario_nombre,
+                foto_file_id,
             ],
         )
 
@@ -93,13 +98,20 @@ async def insertar_gasto(
 async def obtener_gasto(id_gasto: int) -> dict | None:
     async with _client() as client:
         rs = await client.execute(
-            "SELECT id, fecha, item, valor, categoria FROM gastos WHERE id=?",
+            "SELECT id, fecha, item, valor, categoria, foto_file_id FROM gastos WHERE id=?",
             [id_gasto],
         )
         if not rs.rows:
             return None
         row = rs.rows[0]
-        return {"id": row[0], "fecha": row[1], "item": row[2], "valor": row[3], "categoria": row[4]}
+        return {
+            "id": row[0],
+            "fecha": row[1],
+            "item": row[2],
+            "valor": row[3],
+            "categoria": row[4],
+            "foto_file_id": row[5],
+        }
 
 
 async def eliminar_gasto(id_gasto: int) -> bool:
