@@ -60,9 +60,14 @@ def requiere_autorizacion(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id not in AUTHORIZED_USERS:
+            usuario = update.effective_user
+            mensaje = update.message.text or update.message.caption or ""
+            await db_turso.registrar_intento_acceso(
+                usuario.id, usuario.full_name, usuario.username, mensaje
+            )
             await update.message.reply_text(
                 "⛔ No estás autorizado para usar este bot.\n"
-                f"Tu chat_id es: {update.effective_user.id}"
+                f"Tu chat_id es: {usuario.id}"
             )
             return
         return await func(update, context)
@@ -83,6 +88,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "la puede consultar después con /foto.\n\n"
         "Comandos:\n"
         "/id - ver tu chat_id\n"
+        "/intentos - ver quién intentó usar el bot sin autorización\n"
         "/mes - total del mes actual\n"
         "/meses 3 - resumen de los últimos 3 meses\n"
         "/hoy - gastos de hoy\n"
@@ -99,6 +105,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @requiere_autorizacion
 async def mi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Tu chat_id es: {update.effective_chat.id}")
+
+
+@requiere_autorizacion
+async def intentos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    registros = await db_turso.obtener_intentos_acceso()
+
+    if not registros:
+        await update.message.reply_text("No hay intentos de acceso no autorizados registrados.")
+        return
+
+    lineas = ["Intentos de acceso no autorizados (últimos 20):"]
+    for r in registros:
+        arroba = f"@{r['username']}" if r["username"] else "(sin username)"
+        lineas.append(
+            f"\n{r['fecha']} | {r['usuario_nombre']} {arroba} | id: {r['usuario_id']}\n"
+            f'"{r["mensaje"]}"'
+        )
+
+    await update.message.reply_text("\n".join(lineas))
 
 
 @requiere_autorizacion
@@ -527,6 +552,7 @@ async def _build_application():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("id", mi_id))
+    application.add_handler(CommandHandler("intentos", intentos))
     application.add_handler(CommandHandler("mes", mes))
     application.add_handler(CommandHandler("meses", meses))
     application.add_handler(CommandHandler("hoy", hoy))

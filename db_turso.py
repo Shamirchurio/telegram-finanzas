@@ -63,6 +63,17 @@ async def init_db() -> None:
         if "foto_file_id" not in columnas:
             await client.execute("ALTER TABLE gastos ADD COLUMN foto_file_id TEXT")
 
+        await client.execute("""
+            CREATE TABLE IF NOT EXISTS intentos_acceso (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL,
+                usuario_id INTEGER NOT NULL,
+                usuario_nombre TEXT,
+                username TEXT,
+                mensaje TEXT
+            )
+        """)
+
 
 async def insertar_gasto(
     item: str,
@@ -149,6 +160,39 @@ async def actualizar_fecha(id_gasto: int, fecha: datetime) -> None:
                 id_gasto,
             ],
         )
+
+
+async def registrar_intento_acceso(
+    usuario_id: int, usuario_nombre: str, username: str | None, mensaje: str
+) -> None:
+    async with _client() as client:
+        await client.execute(
+            """
+            INSERT INTO intentos_acceso (fecha, usuario_id, usuario_nombre, username, mensaje)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                usuario_id,
+                usuario_nombre,
+                username,
+                mensaje,
+            ],
+        )
+
+
+async def obtener_intentos_acceso(limite: int = 20) -> list[dict]:
+    async with _client() as client:
+        rs = await client.execute(
+            """
+            SELECT fecha, usuario_id, usuario_nombre, username, mensaje
+            FROM intentos_acceso
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            [limite],
+        )
+        return _rows_to_dicts(rs)
 
 
 async def consultar_df(query: str, params: tuple = ()) -> pd.DataFrame:
